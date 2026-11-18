@@ -33,7 +33,7 @@ def _say(msg):
 
 
 def run_demo(workdir: str | None = None, verbose: bool = False) -> bool:
-    workdir = workdir or tempfile.mkdtemp(prefix="interstitial-demo-")
+    workdir = workdir or tempfile.mkdtemp(prefix="enkhora-demo-")
     mib = 1 << 20
     donors = [
         DonorSpec("d1", "job-idle-a", kappa=1.0, mem_mib=4, life_s=1800, extra=["--guard-mib", "0.25", "--slack-mib", "0.25"]),

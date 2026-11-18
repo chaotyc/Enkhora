@@ -11,11 +11,11 @@ import time
 import pytest
 import torch
 
-from interstitial.anchor.anchor import compare
-from interstitial.anchor.dispatcher import DispatchConfig
-from interstitial.cluster import DonorSpec, LocalCluster
-from interstitial.control.planner import PlannerConfig
-from interstitial.model.hf import generate, tiny_qwen3_moe
+from enkhora.anchor.anchor import compare
+from enkhora.anchor.dispatcher import DispatchConfig
+from enkhora.cluster import DonorSpec, LocalCluster
+from enkhora.control.planner import PlannerConfig
+from enkhora.model.hf import generate, tiny_qwen3_moe
 
 rng = random.Random(7)
 PROMPTS = [[1] + [rng.randrange(2, 256) for _ in range(rng.randint(3, 10))] for _ in range(4)]

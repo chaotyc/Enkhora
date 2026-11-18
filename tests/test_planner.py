@@ -1,6 +1,6 @@
 import math
 
-from interstitial.control.planner import ExpSurvival, PBundle, PDonor, PlannerConfig, admissible, plan
+from enkhora.control.planner import ExpSurvival, PBundle, PDonor, PlannerConfig, admissible, plan
 
 MB = 1 << 20
 

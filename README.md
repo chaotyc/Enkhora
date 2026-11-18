@@ -1,7 +1,7 @@
-# Interstitial v1 prototype
+# Enkhora v1 prototype
 
 A working prototype of *Opportunistic MoE Inference: Architecture v0*
-([design doc](Interstitial%20Inference%20Algorithm.md)). The dense trunk and all
+([design doc](Enkhora%20Inference%20Algorithm.md)). The dense trunk and all
 per-request state stay on an anchor. Donor processes hold bundles of expert weights
 and execute them as a pure function. Activations travel; weights never move on the
 decode path.
@@ -22,7 +22,7 @@ real HF architecture. The same code targets Qwen3-30B-A3B or OLMoE on GPUs.
 | Watchdog protects the host | Simulated reclaim spike test, 1000 trials | 0 host failures when the burst between polls fits inside the guard |
 | Planner and predictor | Replay of a 14-day synthetic trace | Coverage, exposure, GiB re-replicated per hour; oracle vs predictor |
 
-"Bitwise" works because of the numeric contract in `interstitial/experts.py`:
+"Bitwise" works because of the numeric contract in `enkhora/experts.py`:
 
 - The dispatcher sends a whole bundle to one replica per layer step, so each expert's matmul input is identical on every replica.
 - Partials are reduced in a fixed order: expert id within a bundle, then bundle id at the anchor.
@@ -41,11 +41,11 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e '.[de
 ```
 
 ```bash
-.venv/bin/python -m interstitial demo
+.venv/bin/python -m enkhora demo
 ```
 
 ```bash
-.venv/bin/python -m interstitial sim --days 14
+.venv/bin/python -m enkhora sim --days 14
 ```
 
 The test suite has 37 tests and runs in about 25 s. The e2e tests spawn real donor processes and SIGKILL or SIGSTOP them.
@@ -53,41 +53,41 @@ The test suite has 37 tests and runs in about 25 s. The e2e tests spawn real don
 ### Separate processes (one machine or many)
 
 ```bash
-python -m interstitial control --port 7400 --expert-demand 1.0
-python -m interstitial donor --id gpu-a --job 9001 --control CTRL:7400 --kappa 1.0 --mem-mib 8 --life-s 3600
-python -m interstitial donor --id gpu-b --job 9002 --control CTRL:7400 --kappa 0.0 --mem-mib 8 --life-s 72000
-python -m interstitial anchor --model tiny --master ./master --control CTRL:7400 --batch 8 --max-new 32
-python -m interstitial ctl status --control CTRL:7400
-python -m interstitial ctl set_kappa gpu-a 0.0 --control CTRL:7400
-python -m interstitial ctl host_alloc gpu-b 6 --control CTRL:7400    # simulated host grows by 6 MiB
-python -m interstitial ctl leave gpu-a --control CTRL:7400
+python -m enkhora control --port 7400 --expert-demand 1.0
+python -m enkhora donor --id gpu-a --job 9001 --control CTRL:7400 --kappa 1.0 --mem-mib 8 --life-s 3600
+python -m enkhora donor --id gpu-b --job 9002 --control CTRL:7400 --kappa 0.0 --mem-mib 8 --life-s 72000
+python -m enkhora anchor --model tiny --master ./master --control CTRL:7400 --batch 8 --max-new 32
+python -m enkhora ctl status --control CTRL:7400
+python -m enkhora ctl set_kappa gpu-a 0.0 --control CTRL:7400
+python -m enkhora ctl host_alloc gpu-b 6 --control CTRL:7400    # simulated host grows by 6 MiB
+python -m enkhora ctl leave gpu-a --control CTRL:7400
 ```
 
 On GPUs, change these flags:
 
 - Donors: add `--device cuda:N --nvml N --guard-mib 12288 --advertise-host <ip>`.
 - Anchor: use `--model Qwen/Qwen3-30B-A3B --dtype bfloat16 --device cuda:0 --bundle-size 16`.
-- Export the master store once: `python -m interstitial export --model … --out ./master --bundle-size 16`.
+- Export the master store once: `python -m enkhora export --model … --out ./master --bundle-size 16`.
 
 ## Layout
 
 | Path | Design section | What it is |
 |---|---|---|
-| `interstitial/experts.py` | §3 | Bundle kernel, `build_route`, fixed-order merge: the numeric contract |
-| `interstitial/store.py` | §4 | Master store (safetensors per bundle, sha256 manifest) |
-| `interstitial/model/hf.py` | §4 | `RemoteMoE` swap-in for HF v5 Qwen3-MoE / OLMoE blocks; tiny test model; export |
-| `interstitial/anchor/dispatcher.py` | §6, §7 | Per-layer scatter/gather, per-donor deadlines, hedging, circuit breaker, epochs between layers, audit |
-| `interstitial/anchor/fallback.py` | §7 | Ladder rungs 3–5 (device cache → RAM → disk); `LocalExecutor` reference |
-| `interstitial/anchor/anchor.py` | §4 | Anchor process: trunk, master-store server, control link |
-| `interstitial/control/planner.py` | §5 | Pure greedy planner: memory, κ, job anti-affinity, admission, hysteresis, store-only sources |
-| `interstitial/control/server.py` | §4, §7 | Registry, replans on events, routing epochs, drain-then-drop, planned leave, quarantine |
-| `interstitial/donor/executor.py` | §4, §8 | Donor process: exec/fetch, throttled checksummed loads, status |
-| `interstitial/donor/slabs.py`, `watchdog.py` | §8 ring 2 | Slab lifecycle; NVML or simulated probe; standbys-first eviction |
-| `interstitial/donor/governor.py` | §8 | Token bucket (burst bounded), AIMD, on/off-window slowdown estimator |
-| `interstitial/sim/` | §9, §11 exp. 1 | Trace schema and loader, synthetic trace, empirical survival, replay |
+| `enkhora/experts.py` | §3 | Bundle kernel, `build_route`, fixed-order merge: the numeric contract |
+| `enkhora/store.py` | §4 | Master store (safetensors per bundle, sha256 manifest) |
+| `enkhora/model/hf.py` | §4 | `RemoteMoE` swap-in for HF v5 Qwen3-MoE / OLMoE blocks; tiny test model; export |
+| `enkhora/anchor/dispatcher.py` | §6, §7 | Per-layer scatter/gather, per-donor deadlines, hedging, circuit breaker, epochs between layers, audit |
+| `enkhora/anchor/fallback.py` | §7 | Ladder rungs 3–5 (device cache → RAM → disk); `LocalExecutor` reference |
+| `enkhora/anchor/anchor.py` | §4 | Anchor process: trunk, master-store server, control link |
+| `enkhora/control/planner.py` | §5 | Pure greedy planner: memory, κ, job anti-affinity, admission, hysteresis, store-only sources |
+| `enkhora/control/server.py` | §4, §7 | Registry, replans on events, routing epochs, drain-then-drop, planned leave, quarantine |
+| `enkhora/donor/executor.py` | §4, §8 | Donor process: exec/fetch, throttled checksummed loads, status |
+| `enkhora/donor/slabs.py`, `watchdog.py` | §8 ring 2 | Slab lifecycle; NVML or simulated probe; standbys-first eviction |
+| `enkhora/donor/governor.py` | §8 | Token bucket (burst bounded), AIMD, on/off-window slowdown estimator |
+| `enkhora/sim/` | §9, §11 exp. 1 | Trace schema and loader, synthetic trace, empirical survival, replay |
 | `bench/colocate.py` | §11 exp. 3 | Host slowdown vs κ (GPU), plus idle-second-context cost |
 | `bench/spike.py` | §11 exp. 4 | Reclaim spike test (GPU via NVML, or simulated) |
-| `interstitial/cluster.py`, `demo.py` | §11 exp. 5 | One-machine cluster harness and chaos demo |
+| `enkhora/cluster.py`, `demo.py` | §11 exp. 5 | One-machine cluster harness and chaos demo |
 
 ## Validation experiments: status
 

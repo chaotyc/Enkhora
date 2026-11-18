@@ -2,8 +2,8 @@ import asyncio
 
 import torch
 
-from interstitial import wire
-from interstitial.transport import LoopThread, RpcClient, serve, server_port
+from enkhora import wire
+from enkhora.transport import LoopThread, RpcClient, serve, server_port
 
 
 def _roundtrip(header, tensors):

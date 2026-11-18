@@ -3,10 +3,10 @@ import copy
 import pytest
 import torch
 
-from interstitial.anchor.fallback import LocalExecutor
-from interstitial.experts import BundleWeights, build_route, bundle_forward, merge_partials
-from interstitial.model.hf import export_master, find_moe_blocks, generate, patch_model, tiny_qwen3_moe
-from interstitial.store import MasterStore
+from enkhora.anchor.fallback import LocalExecutor
+from enkhora.experts import BundleWeights, build_route, bundle_forward, merge_partials
+from enkhora.model.hf import export_master, find_moe_blocks, generate, patch_model, tiny_qwen3_moe
+from enkhora.store import MasterStore
 
 
 @pytest.fixture(scope="module")

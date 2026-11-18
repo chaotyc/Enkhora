@@ -72,7 +72,7 @@ class LocalCluster:
         self.control_loop.stop()
 
     def spawn(self, s: DonorSpec):
-        cmd = [sys.executable, "-m", "interstitial", "donor", "--id", s.id, "--job", s.job,
+        cmd = [sys.executable, "-m", "enkhora", "donor", "--id", s.id, "--job", s.job,
                "--control", f"127.0.0.1:{self.control.port}", "--kappa", str(s.kappa),
                "--mem-mib", str(s.mem_mib), "--threads", str(self.threads), *s.extra]
         if s.life_s is not None:

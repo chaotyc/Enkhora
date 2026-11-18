@@ -34,8 +34,8 @@ import time
 import torch
 
 sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.dirname(__file__)))
-from interstitial.donor.governor import TokenBucket  # noqa: E402
-from interstitial.experts import BundleWeights, bundle_forward  # noqa: E402
+from enkhora.donor.governor import TokenBucket  # noqa: E402
+from enkhora.experts import BundleWeights, bundle_forward  # noqa: E402
 
 
 def synthetic_host(device: str, n: int, q: mp.Queue, stop: mp.Event):
