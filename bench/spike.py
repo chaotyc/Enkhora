@@ -27,9 +27,9 @@ import time
 import torch
 
 sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.dirname(__file__)))
-from interstitial.donor.slabs import SlabManager  # noqa: E402
-from interstitial.donor.watchdog import SimulatedProbe, Watchdog  # noqa: E402
-from interstitial.experts import BundleWeights  # noqa: E402
+from enkhora.donor.slabs import SlabManager  # noqa: E402
+from enkhora.donor.watchdog import SimulatedProbe, Watchdog  # noqa: E402
+from enkhora.experts import BundleWeights  # noqa: E402
 
 GiB = 1 << 30
 MiB = 1 << 20
@@ -97,7 +97,7 @@ def host_proc(device, steps_gib, gap_s, out: mp.Queue):
 
 
 def gpu(a):
-    from interstitial.donor.watchdog import NvmlProbe
+    from enkhora.donor.watchdog import NvmlProbe
 
     rng = random.Random(a.seed)
     idx = int(a.device.split(":")[1]) if ":" in a.device else 0

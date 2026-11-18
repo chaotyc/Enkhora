@@ -2,7 +2,7 @@
 
 Frame layout::
 
-    b"IST1" | u64 header_len | header JSON | buffers (each padded to 8 bytes)
+    b"ENK1" | u64 header_len | header JSON | buffers (each padded to 8 bytes)
 
 The header carries a ``_t`` list of ``[name, dtype, shape, nbytes]`` describing the
 buffers in order. Tensors decode as zero-copy views over one bytearray.
@@ -16,7 +16,7 @@ import struct
 
 import torch
 
-MAGIC = b"IST1"
+MAGIC = b"ENK1"
 _PREFIX = struct.Struct("!4sQ")
 _ALIGN = 8
 MAX_HEADER = 64 << 20

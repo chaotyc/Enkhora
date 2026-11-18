@@ -2,10 +2,10 @@ import random
 
 import torch
 
-from interstitial.donor.governor import AIMD, OnOffEstimator, TokenBucket
-from interstitial.donor.slabs import SlabManager
-from interstitial.donor.watchdog import SimulatedProbe, Watchdog
-from interstitial.experts import BundleWeights
+from enkhora.donor.governor import AIMD, OnOffEstimator, TokenBucket
+from enkhora.donor.slabs import SlabManager
+from enkhora.donor.watchdog import SimulatedProbe, Watchdog
+from enkhora.experts import BundleWeights
 
 
 class Clock:

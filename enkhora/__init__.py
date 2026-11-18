@@ -1,4 +1,4 @@
-"""Interstitial v1: anchored trunk + scavenged expert tier for MoE inference.
+"""Enkhora v1: anchored trunk + scavenged expert tier for MoE inference.
 
 Layout
 ------

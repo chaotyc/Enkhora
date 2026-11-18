@@ -1,4 +1,4 @@
-# Interstitial AI — Opportunistic MoE Inference: Architecture v0 (from scratch)
+# Enkhora — Opportunistic MoE Inference: Architecture v0 (from scratch)
 
 Nov 13, 2026 · @tc
 

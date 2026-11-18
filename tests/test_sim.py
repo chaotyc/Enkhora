@@ -1,9 +1,9 @@
 import math
 
-from interstitial.control.planner import PlannerConfig
-from interstitial.sim.replay import SimConfig, run
-from interstitial.sim.survival import EmpiricalCurve, OracleCurve, SurvivalModel
-from interstitial.sim.trace import load_csv, synthetic, write_csv
+from enkhora.control.planner import PlannerConfig
+from enkhora.sim.replay import SimConfig, run
+from enkhora.sim.survival import EmpiricalCurve, OracleCurve, SurvivalModel
+from enkhora.sim.trace import load_csv, synthetic, write_csv
 
 
 def test_trace_csv_roundtrip(tmp_path):

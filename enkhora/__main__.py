@@ -1,4 +1,4 @@
-"""CLI: interstitial {control,donor,anchor,export,ctl,demo,sim}"""
+"""CLI: enkhora {control,donor,anchor,export,ctl,demo,sim}"""
 
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def cmd_sim(a):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="interstitial")
+    p = argparse.ArgumentParser(prog="enkhora")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="sub", required=True)
 
