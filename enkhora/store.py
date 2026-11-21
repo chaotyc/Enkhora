@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 
 import torch
@@ -65,7 +66,7 @@ class MasterStore:
 
     @staticmethod
     def write(root: str, spec: ExpertSpec, num_experts: int, bundle_size: int,
-              bundles: list[BundleWeights], model: dict | None = None) -> "MasterStore":
+              bundles: Iterable[BundleWeights], model: dict | None = None) -> "MasterStore":
         os.makedirs(os.path.join(root, "bundles"), exist_ok=True)
         metas = []
         for w in bundles:

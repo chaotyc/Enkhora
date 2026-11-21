@@ -1,6 +1,6 @@
 # Enkhora — Opportunistic MoE Inference: Architecture v0 (from scratch)
 
-Nov 13, 2026 · @tc
+Nov 13, 2026
 
 ## Summary
 
@@ -8,7 +8,7 @@ Keep the model's dense trunk and every piece of per-request state on one or two 
 
 The design rests on one asymmetry. In a DeepSeek-V3-class model, routed experts are about 654B of 671B parameters (97%), yet each token uses 8 of 256 per layer ([technical report](https://arxiv.org/abs/2412.19437)). One expert is 44 MB at 8 bits. The activation it needs is 14 KB. Sending the question to the shelf is about 3,000 times cheaper than carrying the book to the desk.
 
-The Quest data shows the same asymmetry on the supply side: 55.7% of paired GPU-hours had peak VRAM under 25%, but only 20.6% had mean compute under 25%. Spare memory is plentiful and spare compute is not. Experts are the part of the model that needs a lot of the first and little of the second.
+Shared GPU clusters tend to show the same asymmetry on the supply side. In the illustrative cluster used throughout this document, roughly half of GPU-hours peak under 25% of VRAM, but only about a fifth have mean compute under 25%. Spare memory is plentiful and spare compute is not. Experts are the part of the model that needs a lot of the first and little of the second.
 
 | Decision | Choice | Reason |
 | --- | --- | --- |
@@ -18,26 +18,28 @@ The Quest data shows the same asymmetry on the supply side: 55.7% of paired GPU-
 | Placement unit | A bundle of co-routed experts (about 1.4 GB), packed layer by layer | Fits fragmented headroom; keeps each layer on few donors |
 | How a donor is described | Three numbers: memory budget, compute budget, survival curve | One planner covers busy hosts, quiet hosts and fully idle GPUs |
 | Co-location mechanism | A separate process and CUDA context per donor GPU, time-sliced, never MPS | Keeps memory and fault domains apart from the host job |
-| Binding constraint | Host compute interference, not memory | Quest memory covers the expert tier 1.3x at P10 and 2.1x at median |
+| Binding constraint | Host compute interference, not memory | In the illustrative cluster, spare memory covers the expert tier about 1.3x at P10 and 2x at median |
 
 **Biggest open number:** how much a host job slows per millisecond of expert kernel time injected into its GPU. Section 11 makes that the first experiment. Every throughput figure below is an estimate until it is measured.
 
-## What the Quest data forces
+## What cluster data forces
 
-Eight observations from the 30-day retrospective each remove a design option. The table reads left to right: what was measured, what it rules out, what the design does instead.
+The sizing in this document uses an illustrative, hypothetical cluster: a shared academic-style Slurm cluster of about 128 GPUs across three GPU and fabric generations, about 80% allocated on average. Every cluster figure below is a rounded assumption about such a cluster, not a measurement of any real one. Validate them against your own cluster's accounting and GPU telemetry; the trace-driven simulator (experiment 1) exists for exactly that.
 
-| Quest observation | What it rules out | Design consequence |
+Eight properties of such a cluster each remove a design option. The table reads left to right: what is assumed or typical, what it rules out, what the design does instead.
+
+| Cluster property (assumed) | What it rules out | Design consequence |
 | --- | --- | --- |
-| 55.7% of paired GPU-hours have peak VRAM under 25%; only 20.6% have mean compute under 25%; 13.0% have both | Treating a donor as a spare GPU | Donors mostly lend memory. Compute is budgeted per donor and spent where hosts are quiet |
-| Median 36 qualifying GPUs at once, spread over about 16 nodes (about 2 per node) | Any design that pools memory only inside a node | The data path is cross-node from day one. Node-local hops are a bonus, not an assumption |
-| 27 of the median 36 have at least 4 hours left, but that count uses future knowledge | A static placement | A lifetime predictor ranks donors. Roughly a quarter of candidates are short-lived at any instant |
-| P10 pooled headroom is 830 GiB after the 12 GiB guard; the expert tier of a 671B model is 609 GiB at 8 bits | Full mirroring at all times | Replication is partial in bad hours. The fallback must be dedicated, not another donor |
-| Peak VRAM is a sampled high-water mark | Sizing headroom from accounting data | Accounting only nominates donors. A live watchdog on the node decides and reclaims |
-| Utilization is kernel-active time; zeros may be missing telemetry | Reading spare compute from jobstats | Each donor's compute budget is learned online, starting near zero |
-| Three GPU and fabric generations (A100 40 GB on EDR, A100 80 GB on HDR, H100 on NDR) | One latency constant, one weight format | Round-trip time is measured per link. Weights are stored at 8 bits and cast to BF16 where FP8 kernels are missing |
-| 131 configured GPUs, 106.8 allocated on average | Ignoring unallocated GPUs | An idle GPU is a donor with a full compute budget and a short, uncertain life. Same planner, no special case |
+| Roughly half of GPU-hours peak under 25% of VRAM; only about a fifth have mean compute under 25%; about one in ten have both | Treating a donor as a spare GPU | Donors mostly lend memory. Compute is budgeted per donor and spent where hosts are quiet |
+| A median of about 35 qualifying GPUs (peak VRAM under 25%, at least 20 GiB spare) at once, spread over about 15 nodes (about 2 per node) | Any design that pools memory only inside a node | The data path is cross-node from day one. Node-local hops are a bonus, not an assumption |
+| About 25 of those 35 have at least 4 hours left, but that count uses future knowledge | A static placement | A lifetime predictor ranks donors. Roughly a quarter of candidates are short-lived at any instant |
+| P10 pooled headroom is about 800 GiB after a 12 GiB per-GPU guard; the expert tier of a 671B model is 609 GiB at 8 bits | Full mirroring at all times | Replication is partial in bad hours. The fallback must be dedicated, not another donor |
+| Peak VRAM in accounting data is a sampled high-water mark | Sizing headroom from accounting data | Accounting only nominates donors. A live watchdog on the node decides and reclaims |
+| Utilization is kernel-active time; zeros may be missing telemetry | Reading spare compute from job statistics | Each donor's compute budget is learned online, starting near zero |
+| Several GPU and fabric generations, bought in different years (for example 40 GB and 80 GB parts on EDR, HDR and NDR InfiniBand) | One latency constant, one weight format | Round-trip time is measured per link. Weights are stored at 8 bits and cast to BF16 where FP8 kernels are missing |
+| About 128 configured GPUs, about 105 allocated on average | Ignoring unallocated GPUs | An idle GPU is a donor with a full compute budget and a short, uncertain life. Same planner, no special case |
 
-Two caveats carry through the whole design. The pooled-memory figures assume separate allocations can be combined, which is not yet proven. And the unallocated count is an accounting average, not a verified live availability rate.
+Two caveats carry through the whole design. The pooled-memory figures assume separate allocations can be combined, which is not yet proven. And an unallocated count from accounting is an average, not a verified live availability rate.
 
 ## Core idea: an anchored trunk and a scavenged expert tier
 
@@ -64,7 +66,7 @@ The anchor adds the partial sums, the shared expert and the residual. The donor 
 
 DeepSeek-V3's router already groups experts. Each layer has 8 groups of 32, and a token draws its 8 experts from at most 4 groups ([config](https://huggingface.co/deepseek-ai/DeepSeek-V3-Base/blob/b3480c8cccc78b782bb7623abb79cc4d104831ad/inference/configs/config_671B.json), [report](https://arxiv.org/abs/2412.19437)). A bundle is one layer's group: 32 experts, 1.41 GB at 8 bits. The model has 464 bundles, and a full layer is 8 bundles, or 11.3 GB.
 
-A bundle fits the smallest donor slot in the screen (20 GiB spare less the 12 GiB guard). Models without routing groups get bundles from co-activation clustering instead.
+A bundle fits even the smallest qualifying donor slot: a GPU with 20 GiB spare keeps about 8 GiB after the 12 GiB guard. Models without routing groups get bundles from co-activation clustering instead.
 
 ### Every donor is three numbers
 
@@ -96,7 +98,7 @@ Solid arrows are the per-token path: hidden rows out, partial sums back. The das
 
 &#91;embedded content: deployment view · roles of GPUs across three fabric islands\]
 
-The anchor sits on the fastest island, and donors span all three GPU generations, so the data path crosses nodes from the start. The 4-GPU job on Quest 12 is one failure domain, so no bundle keeps both of its replicas there.
+The anchor sits on the fastest island, and donors span all three GPU generations, so the data path crosses nodes from the start. A 4-GPU job on one node is one failure domain, so no bundle keeps both of its replicas there.
 
 ### Inside one donor GPU
 
@@ -179,13 +181,13 @@ The second row is the cheapest lever in the system. Both replicas hold identical
 
 Copies are throttled per donor and sourced from store donors or the master, never from a donor under compute pressure.
 
-### Example: a median Quest hour
+### Example: a median hour on the illustrative cluster
 
-The retrospective gives 27 donors with at least 4 hours left and 1,282 GiB between them, about 47 GiB each. Suppose 11 are quiet enough to execute. That figure is the both-under-25% share: 13.0% of 62,827 paired GPU-hours over 720 hours.
+Assume a median hour has about 25 donors with at least 4 hours left and about 1,250 GiB between them, about 50 GiB each, or 49 GiB after the CUDA context and arena. Suppose 10 are quiet enough to execute. That figure is the assumed both-under-25% share, about one in ten, applied to the roughly 105 allocated GPUs.
 
-- The 11 execute donors hold about 517 GiB of primaries, or 85% of the 609 GiB expert tier.
-- The other 15%, about 9 layers, get primaries on unallocated GPUs if any exist, else on the anchor's expert cache.
-- The 16 store donors hold about 752 GiB, enough for a standby of every bundle with room left over.
+- The 10 execute donors hold about 490 GiB of primaries, or 80% of the 609 GiB expert tier.
+- The other 20%, about 12 layers, get primaries on unallocated GPUs if any exist, else on the anchor's expert cache.
+- The 15 store donors hold about 735 GiB, enough for a standby of every bundle with room left over.
 
 ## Decode path and routing
 
@@ -205,7 +207,7 @@ Step 7 is safe only because of the pure-function property in section 3. The dead
 
 ### The wire is not the bottleneck
 
-A token costs 14.3 KB each way per donor contacted per layer. With each layer on one donor that is 1.7 MB per decoded token for the whole model, and at most 4 times that when a token's routing groups sit on different donors. Even the EDR island at 100 Gb/s carries thousands of tokens per second.
+A token costs 14.3 KB each way per donor contacted per layer. With each layer on one donor that is 1.7 MB per decoded token for the whole model, and at most 4 times that when a token's routing groups sit on different donors. Even an EDR island at 100 Gb/s carries thousands of tokens per second.
 
 What matters is hop latency and its tail, because 58 hops run in series:
 
@@ -238,7 +240,7 @@ Two things follow. Small batches are quick per stream, and large batches are che
 
 ## Elasticity and correctness
 
-Correctness never depends on a donor. The brief's warning, that every required expert must be reachable at every decode step, is met by construction: the last rung of the fallback ladder is dedicated hardware holding a full copy.
+Correctness never depends on a donor. The basic requirement, that every required expert must be reachable at every decode step, is met by construction: the last rung of the fallback ladder is dedicated hardware holding a full copy.
 
 ### The invariant
 
@@ -307,13 +309,13 @@ Each donor GPU gets one executor process with its own CUDA context, alongside th
 
 ### Memory: three rings
 
-**Ring 1, admission.** A GPU becomes a donor only after its job has passed a warm-up period and its memory has plateaued. Jobs that pre-allocate most of the device never qualify. The guard is a fixed floor (12 GiB in the retrospective) plus the largest between-sample jump seen for that job and for that account's history.
+**Ring 1, admission.** A GPU becomes a donor only after its job has passed a warm-up period and its memory has plateaued. Jobs that pre-allocate most of the device never qualify. The guard is a fixed floor (12 GiB in this document's examples) plus the largest between-sample jump seen for that job and for that account's history.
 
 **Ring 2, watchdog.** The node agent polls per-process GPU memory every few tens of milliseconds. When free memory falls below a low watermark it frees slabs at once, standbys first, until a high watermark is restored. A free needs no save and no network call. Slabs are fixed-size chunks, so release is a handful of calls.
 
 **Ring 3, interception (optional, per site).** A preloaded shim in the job's environment catches a failed allocation, signals the agent, and retries. It changes the job's environment, not its code.
 
-**What is left over.** Without ring 3, one allocation larger than the guard, made inside one poll interval, can still fail. Say this plainly to directors; it was Clemson's first question. The mitigation is data: measure the step-size distribution of host allocations in pilot telemetry and set the guard so the residual rate is one the center accepts.
+**What is left over.** Without ring 3, one allocation larger than the guard, made inside one poll interval, can still fail. Say this plainly to site operators; it is usually their first question. The mitigation is data: measure the step-size distribution of host allocations in pilot telemetry and set the guard so the residual rate is one the center accepts.
 
 ### Compute: budget, cap, feedback
 
@@ -323,7 +325,7 @@ Each donor GPU gets one executor process with its own CUDA context, alongside th
 4. **Slowdown signal without a baseline.** The governor alternates short, randomized windows with lending allowed and paused. It compares the host process's own activity across them: per-process kernel-active time, power draw, memory-bandwidth counters. Less host work per second in the "on" windows, beyond a tolerance, cuts κ.
 5. **No host, no governor.** An unallocated GPU runs at κ = 1.
 
-The guardrail is the plan's 5% per-job slowdown cap. The site-level metric stays host GPU-hours lost per million tokens.
+The guardrail is a 5% per-job slowdown cap, a target a site would set. The site-level metric stays host GPU-hours lost per million tokens.
 
 ### Hygiene
 
@@ -334,7 +336,7 @@ The guardrail is the plan's 5% per-job slowdown cap. The site-level metric stays
 
 ## Lifetime prediction and admission
 
-The retrospective's "at least 4 hours remaining" filter is an oracle. Its online replacement is a survival curve per job, and the design ensures the predictor's mistakes cost bandwidth, never correctness.
+A sizing analysis's "at least 4 hours remaining" filter is an oracle: it uses each job's actual end time. Its online replacement is a survival curve per job, and the design ensures the predictor's mistakes cost bandwidth, never correctness.
 
 ### What is predicted
 
@@ -356,7 +358,7 @@ A donor is worth filling when its expected usable life covers the load cost seve
 
 L is remaining life, H the planning horizon, t\_load the time to fill M at the throttled copy rate, and α a safety multiple.
 
-**Example.** Filling 47 GiB at a throttled 1 GB/s takes about 50 seconds. With α = 10, the donor needs about 8 expected minutes of life. Both numbers are placeholders to tune, but the conclusion is robust: the bar is far below 4 hours. The 4-hour screen understates the usable pool.
+**Example.** Filling 50 GiB at a throttled 1 GB/s takes about a minute. With α = 10, the donor needs about 9 expected minutes of life. Both numbers are placeholders to tune, but the conclusion is robust: the bar is far below 4 hours. The 4-hour screen understates the usable pool.
 
 Lifetime therefore decides role more than admission. Long expected life earns standbys, where durability matters. Short or uncertain life earns primaries only when a stable standby exists.
 
@@ -371,13 +373,13 @@ Since neither breaks correctness, the predictor is tuned for throughput. Its two
 
 ### Rollout
 
-1. **Offline replay.** Rerun the Quest 15-minute reconstruction with the predictor in place of the oracle. Report how much of the 19 / 27 / 42 donor counts and 830 / 1,282 / 1,948 GiB survive.
+1. **Offline replay.** Rerun a 15-minute reconstruction of your cluster's job intervals with the predictor in place of the oracle. Report how much of the oracle's P10, median and P90 donor counts and pooled GiB survive.
 2. **Shadow mode.** Predict against a live cluster without acting, and score against what jobs did.
 3. **Act**, with planned drains starting a fixed lead time before each job's limit.
 
-## Worked capacity example against Quest
+## Worked capacity example on an illustrative cluster
 
-Memory covers the 671B example's expert tier in all three Quest scenarios; compute is what limits tokens. Quest is the sizing reference here, not a deployment target.
+Memory covers the 671B example's expert tier in all three scenarios of the illustrative cluster from section 2; compute is what limits tokens. The donor counts and pooled VRAM below are rounded assumptions, not measurements. Replace them with your own cluster's figures from experiment 1.
 
 ### Memory
 
@@ -385,34 +387,34 @@ Copies are net of an assumed 1 GiB per donor for the CUDA context and activation
 
 | Scenario | Donors with 4+ hours left | Pooled VRAM after guard | Copies of the expert tier | What the planner does |
 | --- | --- | --- | --- | --- |
-| P10 | 19 | 830 GiB | 1.3 | One primary per bundle; standbys for the third of bundles with the most fragile primaries |
-| Median | 27 | 1,282 GiB | 2.1 | Primary and standby for every bundle |
-| P90 | 42 | 1,948 GiB | 3.1 | Primary, standby, and a third replica for hedging |
+| P10 | About 20 | About 800 GiB | 1.3 | One primary per bundle; standbys for the third of bundles with the most fragile primaries |
+| Median | About 25 | About 1,250 GiB | 2.0 | Primary and standby for every bundle |
+| P90 | About 40 | About 1,900 GiB | 3.1 | Primary, standby, and a third replica for hedging |
 
-**Stress case.** Suppose only half the P10 pool is really usable. Coverage falls to 0.7 copies, and with flat traffic about a third of expert calls land on the anchor. That is too much for one or two anchors to cache. The right response is to step down to a 4-bit build of the model (about 305 GiB) or a smaller model, at request boundaries, not to page.
+**Stress case.** Suppose only half the P10 pool is really usable. Coverage falls to about 0.6 copies, and with flat traffic more than a third of expert calls land on the anchor. That is too much for one or two anchors to cache. The right response is to step down to a 4-bit build of the model (about 305 GiB) or a smaller model, at request boundaries, not to page.
 
 ### Compute
 
-Memory need is fixed at about eight 80 GB GPUs' worth whatever the load. Compute need scales with load. The figures use the decode table in section 6, the plan's 4 input tokens per output token, and an assumed 0.4 ms of expert kernel time per prefill token.
+Memory need is fixed at about eight 80 GB GPUs' worth whatever the load. Compute need scales with load. The figures use the decode table in section 6, an assumed 4 input tokens per output token, and an assumed 0.4 ms of expert kernel time per prefill token.
 
 | Daily output tokens | Output tokens per second | Expert compute needed |
 | --- | --- | --- |
-| 40M (the plan's 2,000-researcher example) | 463 | 1.5 to 3.5 GPU-equivalents |
-| 75M (the plan's break-even with cloud) | 868 | 2.9 to 6.5 GPU-equivalents |
+| 40M (illustrative: a mid-sized research user base) | 463 | 1.5 to 3.5 GPU-equivalents |
+| 75M (illustrative: a larger deployment) | 868 | 2.9 to 6.5 GPU-equivalents |
 
 The low end of each range is decode at B = 256, the high end at B = 64.
 
-Illustrative supply on a Quest-sized cluster: about 11 quiet hosts at κ = 0.25 give roughly 2.8 GPU-equivalents. Unallocated GPUs average about 24 by accounting (131 configured less 106.8 allocated), each worth 1.0 while it lasts, but that count is unverified.
+Illustrative supply on the hypothetical 128-GPU cluster: about 10 quiet hosts at κ = 0.25 give roughly 2.5 GPU-equivalents. Unallocated GPUs would average about 20 to 25 by accounting, each worth 1.0 while it lasts, but an accounting average is not a verified live availability rate.
 
 ### The headline metric
 
-Expert kernel time works out to 0.9 to 2.1 GPU-hours per million output tokens. If every one of those milliseconds displaced host work, the plan's Gate C target of 0.5 would be missed by 2 to 4 times.
+Expert kernel time works out to 0.9 to 2.1 GPU-hours per million output tokens. If every one of those milliseconds displaced host work, an illustrative site target of 0.5 host GPU-hours lost per million tokens would be missed by 2 to 4 times.
 
 So at most a quarter to a half of expert execution may collide with a busy host. The rest must land on unallocated GPUs, on anchors, or in the idle gaps of quiet hosts. That is the whole reason κ exists and why busy hosts store rather than execute.
 
 ### Dedicated footprint
 
-The service owns one or two anchor GPUs on one node, plus about 700 GB of NVMe for the master copy. The plan's cost model compares against an 8-GPU dedicated server for the same model.
+The service owns one or two anchor GPUs on one node, plus about 700 GB of NVMe for the master copy. The natural cost comparison is an 8-GPU dedicated server for the same model.
 
 ## Validation plan, kill criteria and build order
 
@@ -420,14 +422,14 @@ Six experiments, ordered so the cheap ones that can kill or reshape the design r
 
 | # | Experiment | What it measures | Decision it makes | Needs |
 | --- | --- | --- | --- | --- |
-| 1 | Trace-driven simulator: replay the Quest 15-minute job intervals through the planner, predictor and eviction rules | Replica coverage over time, fallback rate, GiB re-replicated per hour, oracle versus predictor | If predicted coverage at P10 falls below one copy, the default becomes a smaller or 4-bit model | A laptop and the data in hand |
+| 1 | Trace-driven simulator: replay a cluster's 15-minute job intervals, reconstructed from accounting data, through the planner, predictor and eviction rules | Replica coverage over time, fallback rate, GiB re-replicated per hour, oracle versus predictor | If predicted coverage at P10 falls below one copy, the default becomes a smaller or 4-bit model | A laptop and a cluster's accounting export |
 | 2 | Routing traces: run the target model family on research-style prompts and log every gate decision | Aggregate versus per-request heat, co-activation, groups touched per token | Confirms or overturns the flat-traffic assumption; fixes the bundle definition and anchor cache policy | One rented GPU node |
 | 3 | Co-location micro-benchmark: a host code plus an executor in a second context injecting expert kernels at κ from 0.5% to 25% | Host slowdown versus κ, our wait time per call, cost per context switch | **The gating number.** If typical codes hit 5% slowdown below about κ = 2%, busy hosts become store-only | One rented GPU |
 | 4 | Reclaim spike test: the host allocates in steps of rising size and speed while slabs are loaded | Time to free, host allocation failures over many trials, with and without ring 3 | Sets the guard and poll interval. Pass is zero host failures for steps inside the guard | One rented GPU |
 | 5 | Split inference: anchor and donors on one node, then two; kill donors mid-step | Logit agreement with a monolithic run, per-layer round trip, hedge hit rate, corrupted sequences (must be zero) | Proves the correctness claim; fixes the hop budget and default g | Two GPU nodes with RDMA |
 | 6 | Fabric sweep: experiment 5 on EDR, HDR and NDR class links | Round trip and tail by generation | Chooses the anchor's island and whether older islands are store-only | Site access |
 
-Experiments 3 and 4 are the plan's Gate A slowdown experiment, restated for this architecture. Use the three host codes the build list already names.
+Experiments 3 and 4 are the core host-slowdown experiment, restated for this architecture. Use a few host codes representative of the target site's workload mix.
 
 **Test model.** The 671B example does not fit a rented pair. The split is scale-free, so use a small MoE with many experts per layer and scale the results by the formulas in sections 6 and 10.
 
@@ -446,11 +448,11 @@ Experiments 3 and 4 are the plan's Gate A slowdown experiment, restated for this
 5. **Compute governor** with on and off windows and AIMD.
 6. **Slurm adapter, kill switch, accounting** for the headline metric.
 
-Per the plan's constraint, none of this runs on Quest. Quest's accounting data informs sizing; experiments run on rented or customer hardware.
+None of this needs a production cluster. A cluster's accounting data informs sizing; experiments run on rented or customer hardware.
 
 ## Open risks and what this design does not solve
 
-The largest risk is policy, not physics: running our process on a GPU allocated to someone else's job needs each center's consent, and the brief itself calls co-location unapproved.
+The largest risk is policy, not physics: running our process on a GPU allocated to someone else's job needs each center's consent, and co-location is not something centers approve today.
 
 | Risk | Why it matters | Response |
 | --- | --- | --- |
@@ -476,7 +478,4 @@ The largest risk is policy, not physics: running our process on a GPU allocated 
 - [Harvest (arXiv 2602.00328)](https://arxiv.org/html/2602.00328v1): peer-memory placement and revocation
 - [NVIDIA MPS guide: when to use MPS](https://docs.nvidia.com/deploy/mps/615/when-to-use-mps.html): compute modes, single-user limit, fault reporting
 - [NVIDIA Run:ai: GPU time-slicing](https://run-ai-docs.nvidia.com/self-hosted/platform-management/runai-scheduler/resource-optimization/time-slicing): default time-slicing shares runtime evenly
-- Northwestern Quest retrospective, 21 Sep to 21 Oct 2026 (design brief, 5 Nov 2026): all Quest figures
-- Project docs: the Cleanroom plan, the engineering build list, and the Clemson interview notes, used for constraints and gate targets only
-
-Sizing figures not listed above are this document's own arithmetic and are marked as estimates where they depend on unmeasured hardware behaviour.
+Cluster figures (section 2, the example in section 5, and section 10) describe a hypothetical cluster and are rounded assumptions, not measurements; validate them against your own cluster's data. Other sizing figures not listed above are this document's own arithmetic and are marked as estimates where they depend on unmeasured hardware behaviour.

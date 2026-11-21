@@ -29,8 +29,8 @@ class SimConfig:
     warmup_s: float = 1800.0          # ring 1: a job must have run this long to lend
     quiet_util: float = 0.25
     kappa_quiet: float = 0.25
-    lend_unallocated: bool = False    # unverified in the retrospective; opt in with --unallocated
-    max_peak_frac: float = 0.25       # the retrospective's screen: peak VRAM under 25%
+    lend_unallocated: bool = False    # accounting averages overstate live idle GPUs; opt in with --unallocated
+    max_peak_frac: float = 0.25       # donor screen: peak VRAM under 25% of capacity
     train_frac: float = 0.5
 
 

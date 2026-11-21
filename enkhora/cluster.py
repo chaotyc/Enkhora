@@ -35,10 +35,15 @@ class DonorSpec:
 class LocalCluster:
     def __init__(self, workdir: str, donors: list[DonorSpec], model: str = "tiny", bundle_size: int = 8,
                  planner: PlannerConfig | None = None, dispatch: DispatchConfig | None = None,
-                 seed: int = 0, threads: int = 1, log_dir: str | None = None):
+                 seed: int = 0, threads: int = 1, log_dir: str | None = None,
+                 device: str = "cpu", dtype: str | None = None, model_loader=None):
+        """``device``/``dtype`` place the anchor (donor devices go in ``DonorSpec.extra``).
+        ``model_loader`` is an optional ``() -> (model, MasterStore)`` replacing
+        ``make_anchor_model`` (e.g. a model already exported and moved to the GPU)."""
         self.workdir = workdir
         self.specs = donors
         self.model_name, self.bundle_size, self.seed = model, bundle_size, seed
+        self.device, self.dtype, self.model_loader = device, dtype, model_loader
         self.planner_cfg = planner or PlannerConfig(copy_rate_Bps=1e12, alpha=1.0)
         self.dispatch_cfg = dispatch or DispatchConfig()
         self.threads = threads
@@ -49,12 +54,21 @@ class LocalCluster:
         self.anchor: Anchor | None = None
 
     # ------------------------------------------------------------ lifecycle
-    def start(self, wait_replicas: int = 1, timeout: float = 60.0):
+    def start(self, wait_replicas: int = 1, timeout: float = 60.0, spawn_donors: bool = True):
         os.makedirs(self.log_dir, exist_ok=True)
         self.start_control()
-        model, master = make_anchor_model(self.model_name, os.path.join(self.workdir, "master"),
-                                          self.bundle_size, seed=self.seed)
-        self.anchor = Anchor(model, master, control=("127.0.0.1", self.control.port), cfg=self.dispatch_cfg)
+        if self.model_loader is not None:
+            model, master = self.model_loader()
+        else:
+            model, master = make_anchor_model(self.model_name, os.path.join(self.workdir, "master"),
+                                              self.bundle_size, seed=self.seed, device=self.device, dtype=self.dtype)
+        self.anchor = Anchor(model, master, control=("127.0.0.1", self.control.port), device=self.device,
+                             cfg=self.dispatch_cfg)
+        if spawn_donors:
+            self.start_donors(wait_replicas, timeout)
+        return self
+
+    def start_donors(self, wait_replicas: int = 1, timeout: float = 60.0):
         for s in self.specs:
             self.spawn(s)
         if wait_replicas and not self.anchor.wait_for_coverage(wait_replicas, timeout):

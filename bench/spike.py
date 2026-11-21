@@ -85,23 +85,24 @@ def simulated(a):
 
 def host_proc(device, steps_gib, gap_s, out: mp.Queue):
     torch.cuda.set_device(device)
-    held, fails = [], 0
+    held, fails, times = [], 0, []
     for s in steps_gib:
         time.sleep(gap_s)
         try:
             held.append(torch.empty(int(s * GiB), dtype=torch.uint8, device=device))
+            times.append(time.monotonic())        # CLOCK_MONOTONIC: comparable across processes
         except torch.cuda.OutOfMemoryError:
             fails += 1
             break
-    out.put(fails)
+    out.put((fails, times))
 
 
 def gpu(a):
     from enkhora.donor.watchdog import NvmlProbe
 
     rng = random.Random(a.seed)
-    idx = int(a.device.split(":")[1]) if ":" in a.device else 0
-    rows, free_ms = [], []
+    idx = a.nvml if a.nvml is not None else (int(a.device.split(":")[1]) if ":" in a.device else 0)
+    rows, free_ms, react_ms = [], [], []
     ctx = mp.get_context("spawn")
     for trial in range(a.trials):
         slabs = SlabManager(a.device)
@@ -118,17 +119,25 @@ def gpu(a):
         p = ctx.Process(target=host_proc, args=(a.device, [step] * n_steps, a.mean_gap_ms / 1e3, q))
         t0 = time.monotonic()
         p.start()
-        fails = q.get()
+        fails, alloc_times = q.get()
         p.join()
         wd.stop()
         if evict_times:
             free_ms.append((evict_times[0] - t0) * 1e3)
+            before = [t for t in alloc_times if t <= evict_times[0]]
+            if before:      # the host allocation that crossed the guard -> end of the first eviction round
+                react_ms.append((evict_times[0] - before[-1]) * 1e3)
         slabs.drop_all()
         rows.append((step, fails))
     report(rows, a.guard_gib, unit="step")     # on hardware we see steps, not the poll-relative burst
     if free_ms:
         free_ms.sort()
         print(f"time to first free (ms): p50 {free_ms[len(free_ms) // 2]:.1f}  p99 {free_ms[int(0.99 * (len(free_ms) - 1))]:.1f}")
+    if react_ms:
+        react_ms.sort()
+        print(f"watchdog reaction (ms, host allocation -> first eviction round done): "
+              f"p50 {react_ms[len(react_ms) // 2]:.1f}  p99 {react_ms[int(0.99 * (len(react_ms) - 1))]:.1f}  "
+              f"max {react_ms[-1]:.1f}")
 
 
 def report(rows, guard_gib, unit="burst"):
@@ -147,6 +156,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--simulate", action="store_true")
     ap.add_argument("--device", default="cuda:0")
+    ap.add_argument("--nvml", type=int, default=None, help="NVML index of --device (default: its CUDA index)")
     ap.add_argument("--trials", type=int, default=200)
     ap.add_argument("--steps", type=int, default=40, help="host allocations per trial")
     ap.add_argument("--gpu-gib", type=float, default=80)

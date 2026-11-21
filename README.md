@@ -1,7 +1,7 @@
 # Enkhora v1 prototype
 
 A working prototype of *Opportunistic MoE Inference: Architecture v0*
-([design doc](Enkhora%20Inference%20Algorithm.md)). The dense trunk and all
+([design doc](docs/design.md)). The dense trunk and all
 per-request state stay on an anchor. Donor processes hold bundles of expert weights
 and execute them as a pure function. Activations travel; weights never move on the
 decode path.
@@ -69,6 +69,65 @@ On GPUs, change these flags:
 - Anchor: use `--model Qwen/Qwen3-30B-A3B --dtype bfloat16 --device cuda:0 --bundle-size 16`.
 - Export the master store once: `python -m enkhora export --model … --out ./master --bundle-size 16`.
 
+## Validate on GPUs
+
+Two scripts each run everything testable at one scale and write a shareable folder:
+`results/<name>-<timestamp>/` holding `summary.md`, `summary.json` and per-stage logs.
+Each stage records pass, fail or skip and the run continues past failures. Both take
+`--dry-run`-style CPU modes, which is how they are checked in this repo. Neither has run
+on real GPUs yet.
+
+### One GPU
+
+```bash
+bash scripts/test_single_gpu.sh             # default model allenai/OLMoE-1B-7B-0924 (~14 GB)
+bash scripts/test_single_gpu.sh --quick
+bash scripts/test_single_gpu.sh --model Qwen/Qwen3-30B-A3B   # 80 GB GPU, ~70 GB free host RAM
+bash scripts/test_single_gpu.sh --dry-run   # CPU only, checks the orchestration
+```
+
+Stages:
+- environment capture
+- the test suite
+- tiny-model split decode plus chaos, with donors in separate CUDA contexts and the NVML watchdog
+- the real model end to end: bitwise vs all-local, tokens/s, per-layer latency, decoded text, chaos
+- experiment 3 (host slowdown vs κ)
+- experiment 4 (reclaim spike)
+- the AIMD governor against real NVML counters
+- the simulator
+
+On first run it creates `.venv-gpu`; to use an existing interpreter, pass `--python PATH`.
+
+### A cluster (Slurm or SSH)
+
+```bash
+# Slurm: inside your own allocation
+salloc -N 2 --ntasks-per-node=1 --cpus-per-task=16 --gres=gpu:4 --mem=200G --time=01:00:00
+scripts/test_cluster.sh                      # OLMoE-1B-7B; --model tiny for a smoke test
+scripts/test_cluster.sh --model Qwen/Qwen3-30B-A3B --bundle-size 16 --master-dir /local/scratch/m
+
+# SSH: one host per line, node 0 first:  [user@]host [slots=N] [addr=IP] [job=ID]
+scripts/test_cluster.sh --hosts hosts.txt --iface ib0 --sync
+
+# This machine, CPU only; --print-plan shows the exact commands without running them
+scripts/test_cluster.sh --launcher local --model tiny
+scripts/test_cluster.sh --launcher slurm --nodelist 'gpu[01-03]' --fake-gpus 4 --print-plan
+```
+
+Node 0 runs the control plane and the anchor, and every other GPU runs a donor.
+
+Stages:
+- inventory and code-version check
+- the fabric round trip per link, measured with the project's own transport
+- real-model distributed decode across nodes vs all-local, with a batch sweep
+- chaos across nodes: SIGKILL, SIGSTOP, κ → 0 with 0 bytes moved, planned leave, control-plane death, all donors killed
+- optional experiment 3 on each GPU model
+
+Cleanup kills everything it started on every node, including after Ctrl-C.
+
+**Security:** every role listens on an unauthenticated TCP port. Run only inside your
+own allocation or on a trusted network.
+
 ## Layout
 
 | Path | Design section | What it is |
@@ -93,7 +152,7 @@ On GPUs, change these flags:
 
 | # | Experiment | Status |
 |---|---|---|
-| 1 | Trace-driven simulator | **Runs.** Needs the Quest reconstruction converted to the CSV schema in `sim/trace.py`. The bundled synthetic trace is calibrated only to the retrospective's donor counts and is not evidence |
+| 1 | Trace-driven simulator | **Runs.** Needs a real cluster's accounting and GPU telemetry export converted to the CSV schema in `sim/trace.py`. The bundled synthetic trace models a hypothetical 128-GPU cluster with rough, illustrative assumptions and is not evidence |
 | 2 | Routing traces | Not started. Bundles are contiguous expert ranges until traces justify clustering |
 | 3 | Co-location micro-benchmark | **Harness ready**, needs one GPU: `python bench/colocate.py --device cuda:0 --host-cmd '<host code>'` |
 | 4 | Reclaim spike test | **Simulated: pass.** GPU mode ready (`--device cuda:0`), not run |
@@ -113,3 +172,7 @@ Spike-test finding to carry into the design: the residual risk is wider than "on
 - **Placement and routing.** A bundle without a compute-backed primary still lists its store replicas. Their budget refusals steer the dispatcher to the anchor after one round trip.
 - **Model loading.** Loading a real model materializes its experts once before `patch_model` drops them, so the peak RAM is the full model.
 - **Untested on hardware.** NVML probes, `--device cuda`, and the AIMD loop against real counters are written but untested here, because there is no GPU on this machine.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

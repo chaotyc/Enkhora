@@ -65,20 +65,26 @@ def spec_from_model(model: nn.Module) -> ExpertSpec:
 
 
 def export_master(model: nn.Module, root: str, bundle_size: int, model_info: dict | None = None) -> MasterStore:
-    """Write every MoE layer's experts to the master store, bundle by bundle."""
+    """Write every MoE layer's experts to the master store, bundle by bundle.
+
+    Bundles are produced lazily, so peak extra RAM is one bundle, not a second copy
+    of the expert tier."""
     blocks = find_moe_blocks(model)
     if not blocks:
         raise ValueError("no supported sparse MoE blocks found")
     spec = spec_from_model(model)
     num_experts = blocks[0][1].experts.gate_up_proj.shape[0]
-    bundles, bid = [], 0
-    for layer, block in blocks:
-        gu, dn = block.experts.gate_up_proj.data, block.experts.down_proj.data
-        for exps in split_experts(num_experts, bundle_size):
-            idx = torch.tensor(exps)
-            bundles.append(BundleWeights(bid, layer, exps, gu[idx].clone().cpu(), dn[idx].clone().cpu()))
-            bid += 1
-    return MasterStore.write(root, spec, num_experts, bundle_size, bundles, model_info)
+
+    def bundles():
+        bid = 0
+        for layer, block in blocks:
+            gu, dn = block.experts.gate_up_proj.data, block.experts.down_proj.data
+            for exps in split_experts(num_experts, bundle_size):
+                idx = torch.tensor(exps)
+                yield BundleWeights(bid, layer, exps, gu[idx].clone().cpu(), dn[idx].clone().cpu())
+                bid += 1
+
+    return MasterStore.write(root, spec, num_experts, bundle_size, bundles(), model_info)
 
 
 def patch_model(model: nn.Module, executor: LayerExecutor | None = None) -> nn.Module:

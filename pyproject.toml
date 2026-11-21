@@ -3,6 +3,8 @@ name = "enkhora"
 version = "0.1.0"
 description = "v1 prototype of opportunistic MoE inference: anchored trunk, scavenged expert tier"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "torch>=2.2",
     "numpy",
@@ -18,7 +20,7 @@ dev = ["pytest"]
 enkhora = "enkhora.__main__:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

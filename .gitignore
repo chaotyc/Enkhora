@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 master/
 *.csv
+results/
+.cache/
+.enkhora_rev
+.single-gpu-work/
+.venv-gpu/

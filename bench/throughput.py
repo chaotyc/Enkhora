@@ -1,4 +1,5 @@
-"""Projected maximum token throughput on a Quest-sized cluster, for batched (offline) jobs.
+"""Projected maximum token throughput on the design doc's illustrative
+~128-GPU shared cluster, for batched (offline) jobs.
 
 A back-of-envelope model built from the design doc's own figures (sections 3, 6 and 10).
 Replace the assumptions with measured numbers as experiments 3, 5 and 6 land.
@@ -51,9 +52,9 @@ class Assumptions:
     rtt_s: float = 50e-6
     wait_s: float = 1e-3                 # time-slice wait on a shared donor
     spread_g: int = 2                    # donors per layer
-    # Quest supply (design doc, median hour)
-    quiet_hosts: int = 11
-    quiet_mem_gib: float = 47
+    # Supply on the design doc's illustrative cluster (median hour; assumptions, not data)
+    quiet_hosts: int = 10
+    quiet_mem_gib: float = 50
     unalloc_mem_gib: float = 60          # mix of 40 and 80 GB GPUs, after context
     kappa_exec_min: float = 0.05         # planner: below this a donor only stores
 

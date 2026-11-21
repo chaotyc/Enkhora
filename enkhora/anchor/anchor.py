@@ -84,15 +84,16 @@ class Anchor:
             self.loop.submit(self._control.push({"op": "quarantine", "donor": donor}))
 
     # ------------------------------------------------------------ serving
-    def generate(self, prompts: list[list[int]], max_new_tokens: int):
-        return generate(self.model, prompts, max_new_tokens)
+    def generate(self, prompts: list[list[int]], max_new_tokens: int, pad_id: int = 0):
+        return generate(self.model, prompts, max_new_tokens, pad_id=pad_id)
 
-    def generate_local(self, prompts, max_new_tokens):
-        """Reference: every bundle on this process with the same kernel contract."""
-        ref = LocalExecutor(self.master, self.device, self.dispatcher.cfg.chunk_rows)
+    def generate_local(self, prompts, max_new_tokens, pad_id: int = 0, executor: LocalExecutor | None = None):
+        """Reference: every bundle on this process with the same kernel contract.
+        Pass ``executor`` to reuse one (e.g. with all bundles preloaded on the device)."""
+        ref = executor or LocalExecutor(self.master, self.device, self.dispatcher.cfg.chunk_rows)
         set_executor(self.model, ref)
         try:
-            return generate(self.model, prompts, max_new_tokens)
+            return generate(self.model, prompts, max_new_tokens, pad_id=pad_id)
         finally:
             set_executor(self.model, self.dispatcher)
 
@@ -127,7 +128,10 @@ class Anchor:
 
 def make_anchor_model(name: str, master_dir: str, bundle_size: int, seed: int = 0, device="cpu",
                       dtype: str | None = None):
-    """Load a model and its master store, exporting the store if it does not exist yet."""
+    """Load a model and its master store, exporting the store if it does not exist yet.
+
+    The experts are dropped (``patch_model``) before the move to ``device``, so only the
+    trunk ever reaches the anchor's GPU."""
     import os
 
     from ..model.hf import export_master, load_model
@@ -136,7 +140,7 @@ def make_anchor_model(name: str, master_dir: str, bundle_size: int, seed: int = 
     if not os.path.exists(os.path.join(master_dir, "manifest.json")):
         export_master(model, master_dir, bundle_size, {"name": name, "seed": seed})
     master = MasterStore(master_dir)
-    return model.to(device), master
+    return patch_model(model).to(device), master
 
 
 @torch.no_grad()

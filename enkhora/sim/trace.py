@@ -3,7 +3,7 @@
 CSV schema (one row per GPU per interval; empty ``job`` = unallocated GPU)::
 
     t            seconds since trace start (interval start)
-    gpu          stable GPU id, e.g. qgpu3012:2
+    gpu          stable GPU id, e.g. gpu-node12:2
     node         node name
     fabric       EDR | HDR | NDR
     mem_gib      GPU memory capacity
@@ -16,9 +16,10 @@ CSV schema (one row per GPU per interval; empty ``job`` = unallocated GPU)::
     peak_mem_gib sampled high-water mark of the job on this GPU in this interval
     mean_util    kernel-active fraction in this interval (0..1)
 
-Convert the Quest 30-day reconstruction to this schema to replay it. ``synthetic``
-generates a trace with the same schema, loosely calibrated to the retrospective's
-headline numbers, so the pipeline runs without the real data.
+To replay a real cluster, convert its accounting and GPU telemetry export (e.g. Slurm
+``sacct`` job records joined with per-GPU memory and utilization samples) to this
+schema. ``synthetic`` generates a trace with the same schema for a hypothetical
+mid-sized cluster, so the pipeline runs without real data.
 """
 
 from __future__ import annotations
@@ -84,14 +85,15 @@ def write_csv(trace: Trace, path: str):
                             s.partition, s.account, round(s.peak_mem_gib, 3), round(s.mean_util, 4)])
 
 
-def synthetic(days: float = 14, seed: int = 0, target_alloc: float = 0.815,
-              low_mem_share: float = 0.30, low_util_share: float = 0.206) -> Trace:
-    """131 GPUs over three generations; jobs of 1/2/4 GPUs; ~81% allocated on average.
+def synthetic(days: float = 14, seed: int = 0, target_alloc: float = 0.8,
+              low_mem_share: float = 0.30, low_util_share: float = 0.20) -> Trace:
+    """A hypothetical cluster: 128 GPUs over three generations; jobs of 1/2/4 GPUs;
+    ~80% allocated on average.
 
-    ``low_mem_share`` (jobs peaking under 25% VRAM) is tuned so the median count of
-    qualifying donors lands near the retrospective's 36; ``low_util_share`` follows its
-    20.6% of GPU-hours under 25% compute. Synthetic numbers are placeholders for the
-    real reconstruction, not evidence."""
+    ``low_mem_share`` (jobs peaking under 25% VRAM) and ``low_util_share`` (share of
+    GPU-hours under 25% compute, about a fifth) are rough, illustrative assumptions
+    that put a few dozen qualifying donors in a typical interval. Synthetic numbers
+    are placeholders for your own cluster's data, not evidence."""
     rng = random.Random(seed)
     gpus = []   # (gpu, node, fabric, mem)
     def add_nodes(prefix, n_nodes, per, fabric, mem):
@@ -101,7 +103,6 @@ def synthetic(days: float = 14, seed: int = 0, target_alloc: float = 0.815,
     add_nodes("a40n", 10, 4, "EDR", 40.0)
     add_nodes("a80n", 12, 4, "HDR", 80.0)
     add_nodes("h100n", 10, 4, "NDR", 80.0)
-    add_nodes("h100x", 1, 3, "NDR", 80.0)
     by_node: dict[str, list[str]] = {}
     for g, n, _, _ in gpus:
         by_node.setdefault(n, []).append(g)
@@ -134,7 +135,7 @@ def synthetic(days: float = 14, seed: int = 0, target_alloc: float = 0.815,
             take = [g for g in by_node[node] if g not in owner][:k]
             acct = rng.choice(accounts)
             limit = rng.choice([4, 8, 12, 24, 48]) * 3600
-            part = "short" if limit <= 4 * 3600 else "gengpu"
+            part = "short" if limit <= 4 * 3600 else "gpu"
             if rng.random() < 0.12:
                 dur = rng.uniform(60, 1800)                          # early crash / typo
             else:

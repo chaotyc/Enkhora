@@ -11,7 +11,7 @@ def test_trace_csv_roundtrip(tmp_path):
     p = tmp_path / "t.csv"
     write_csv(tr, str(p))
     back = load_csv(str(p))
-    assert back.times == tr.times and len(back.samples[3]) == 131
+    assert back.times == tr.times and len(back.samples[3]) == 128
     g = next(iter(tr.samples[10]))
     assert back.samples[10][g].job == tr.samples[10][g].job
 
